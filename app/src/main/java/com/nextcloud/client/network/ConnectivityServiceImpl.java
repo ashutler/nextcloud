@@ -63,9 +63,13 @@ class ConnectivityServiceImpl implements ConnectivityService {
     @Override
     public void isNetworkAndServerAvailable(@NonNull GenericCallback<Boolean> callback) {
         new Thread(() -> {
+            logActiveNetworkState("isNetworkAndServerAvailable");
             Network activeNetwork = platformConnectivityManager.getActiveNetwork();
             NetworkCapabilities networkCapabilities = platformConnectivityManager.getNetworkCapabilities(activeNetwork);
-            boolean hasInternet = networkCapabilities != null && networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            boolean hasInternet = networkCapabilities != null &&
+                networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            boolean isValidated = networkCapabilities != null &&
+                networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
 
             boolean result;
             if (hasInternet) {
@@ -74,6 +78,13 @@ class ConnectivityServiceImpl implements ConnectivityService {
                 Log_OC.e(TAG, "network and server not available");
                 result = false;
             }
+
+            Log_OC.d(
+                TAG,
+                "isNetworkAndServerAvailable(): hasInternet=" + hasInternet +
+                    ", validated=" + isValidated +
+                    ", result=" + result
+            );
 
             mainThreadHandler.post(() -> callback.onComplete(result));
         }).start();
@@ -109,8 +120,11 @@ class ConnectivityServiceImpl implements ConnectivityService {
 
     @Override
     public boolean isInternetWalled() {
+        logActiveNetworkState("isInternetWalled");
         final Boolean cachedValue = walledCheckCache.getValue();
         if (cachedValue != null) {
+            Log_OC.d(TAG, "isInternetWalled(): cachedValue=" + cachedValue);
+
             if (cachedValue) {
                 Log_OC.e(TAG, "network is walled, cached value is used");
             }
@@ -122,6 +136,13 @@ class ConnectivityServiceImpl implements ConnectivityService {
 
             boolean result;
             Connectivity c = getConnectivity();
+            Log_OC.d(
+                TAG,
+                "isInternetWalled(): baseServerAddress=" + baseServerAddress +
+                    ", connected=" + (c != null && c.isConnected()) +
+                    ", wifi=" + (c != null && c.isWifi()) +
+                    ", metered=" + (c != null && c.isMetered())
+            );
             if (c != null && c.isConnected() && c.isWifi() && !c.isMetered() && !baseServerAddress.isEmpty()) {
                 Log_OC.d(TAG, "checking network status");
 
@@ -129,9 +150,16 @@ class ConnectivityServiceImpl implements ConnectivityService {
                 PlainClient client = clientFactory.createPlainClient();
 
                 int status = get.execute(client);
+                long responseLength = get.getResponseContentLength();
+                Log_OC.d(
+                    TAG,
+                    "isInternetWalled(): probe status=" + status +
+                        ", contentLength=" + responseLength +
+                        ", route=" + CONNECTIVITY_CHECK_ROUTE
+                );
 
                 // Content-Length is not available when using chunked transfer encoding, so check for -1 as well
-                result = !(status == HttpStatus.SC_NO_CONTENT && get.getResponseContentLength() <= 0);
+                result = !(status == HttpStatus.SC_NO_CONTENT && responseLength <= 0);
                 get.releaseConnection();
                 if (result) {
                     Log_OC.w(TAG, "isInternetWalled(): Failed to GET " + CONNECTIVITY_CHECK_ROUTE + "," +
@@ -168,6 +196,7 @@ class ConnectivityServiceImpl implements ConnectivityService {
 
     @Override
     public Connectivity getConnectivity() {
+        logActiveNetworkState("getConnectivity");
         NetworkInfo networkInfo;
         try {
             networkInfo = platformConnectivityManager.getActiveNetworkInfo();
@@ -182,6 +211,13 @@ class ConnectivityServiceImpl implements ConnectivityService {
             boolean isMetered;
             isMetered = isNetworkMetered();
             boolean isWifi = networkInfo.getType() == ConnectivityManager.TYPE_WIFI || hasNonCellularConnectivity();
+            Log_OC.d(
+                TAG,
+                "getConnectivity(): type=" + networkInfo.getType() +
+                    ", subtype=" + networkInfo.getSubtype() +
+                    ", detailedState=" + networkInfo.getDetailedState() +
+                    ", connectedOrConnecting=" + isConnected
+            );
 
             if (isMetered) {
                 Log_OC.w(TAG, "getConnectivity(): network is metered");
@@ -218,11 +254,66 @@ class ConnectivityServiceImpl implements ConnectivityService {
 
     private boolean hasNonCellularConnectivity() {
         for (NetworkInfo networkInfo : platformConnectivityManager.getAllNetworkInfo()) {
+            Log_OC.d(
+                TAG,
+                "hasNonCellularConnectivity(): type=" + networkInfo.getType() +
+                    ", connectedOrConnecting=" + networkInfo.isConnectedOrConnecting()
+            );
             if (networkInfo.isConnectedOrConnecting() && (networkInfo.getType() == ConnectivityManager.TYPE_WIFI ||
                 networkInfo.getType() == ConnectivityManager.TYPE_ETHERNET)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void logActiveNetworkState(String source) {
+        try {
+            Network activeNetwork = platformConnectivityManager.getActiveNetwork();
+            NetworkCapabilities capabilities = platformConnectivityManager.getNetworkCapabilities(activeNetwork);
+            NetworkInfo activeNetworkInfo = platformConnectivityManager.getActiveNetworkInfo();
+
+            boolean hasInternet = capabilities != null &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            boolean hasValidated = capabilities != null &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            boolean notRestricted = capabilities != null &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED);
+            boolean captivePortal = capabilities != null &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL);
+
+            String transports = capabilities == null ? "[]" : "["
+                + "wifi=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                + ",cellular=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                + ",ethernet=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                + ",vpn=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                + ",bluetooth=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)
+                + ",wifiAware=" + capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
+                + ",usb=" + (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_USB))
+                + "]";
+
+            String activeNetworkInfoLog = activeNetworkInfo == null ? "null" :
+                "type=" + activeNetworkInfo.getType() +
+                    ",subtype=" + activeNetworkInfo.getSubtype() +
+                    ",state=" + activeNetworkInfo.getState() +
+                    ",detailedState=" + activeNetworkInfo.getDetailedState() +
+                    ",connected=" + activeNetworkInfo.isConnected() +
+                    ",connectedOrConnecting=" + activeNetworkInfo.isConnectedOrConnecting();
+
+            Log_OC.d(
+                TAG,
+                source + "(): activeNetwork=" + activeNetwork +
+                    ", activeNetworkInfo={" + activeNetworkInfoLog + "}" +
+                    ", capabilities=" + capabilities +
+                    ", transports=" + transports +
+                    ", hasInternet=" + hasInternet +
+                    ", validated=" + hasValidated +
+                    ", notRestricted=" + notRestricted +
+                    ", captivePortal=" + captivePortal
+            );
+        } catch (RuntimeException e) {
+            Log_OC.e(TAG, source + "(): failed to log active network state", e);
+        }
     }
 }

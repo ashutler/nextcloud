@@ -18,7 +18,6 @@ import com.owncloud.android.lib.common.operations.RemoteOperation;
 import com.owncloud.android.lib.common.operations.RemoteOperationResult;
 import com.owncloud.android.lib.common.operations.RemoteOperationResult.ResultCode;
 import com.owncloud.android.lib.common.utils.Log_OC;
-import com.owncloud.android.lib.resources.status.GetStatusRemoteOperation;
 import com.owncloud.android.lib.resources.status.OwnCloudVersion;
 import com.owncloud.android.operations.DetectAuthenticationMethodOperation.AuthenticationMethod;
 
@@ -60,9 +59,8 @@ public class GetServerInfoOperation extends RemoteOperation {
      */
 	@Override
 	protected RemoteOperationResult run(OwnCloudClient client) {
-
 	    // first: check the status of the server (including its version)
-        GetStatusRemoteOperation getStatus = new GetStatusRemoteOperation(mContext);
+        PatchedGetStatusRemoteOperation getStatus = new PatchedGetStatusRemoteOperation(mContext);
 
 	    RemoteOperationResult result = getStatus.execute(client);
 
