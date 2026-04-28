@@ -1105,6 +1105,7 @@ public class AuthenticatorActivity extends AccountAuthenticatorActivity
                 }
             }
         } else {
+            logServerInfoFailure(result);
             updateServerStatusIconAndText(result);
             showServerStatus();
         }
@@ -1112,6 +1113,19 @@ public class AuthenticatorActivity extends AccountAuthenticatorActivity
         // very special case (TODO: move to a common place for all the remote operations)
         if (result.getCode() == ResultCode.SSL_RECOVERABLE_PEER_UNVERIFIED) {
             showUntrustedCertDialog(result);
+        }
+    }
+
+    private void logServerInfoFailure(RemoteOperationResult result) {
+        String message = "Server info check failed with code " + result.getCode();
+        if (result.getException() != null) {
+            Log_OC.e(
+                TAG,
+                message + " and exception " + result.getException().getClass().getSimpleName(),
+                result.getException()
+            );
+        } else {
+            Log_OC.e(TAG, message + " without exception");
         }
     }
 
